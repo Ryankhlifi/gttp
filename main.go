@@ -149,7 +149,10 @@ func testHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Length", "1048576")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(payload))
+	_, err := w.Write([]byte(payload))
+	if err != nil {
+		return
+	}
 
 }
 
