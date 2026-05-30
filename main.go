@@ -7,13 +7,21 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strconv"
 )
 
 type ResponseWriter struct {
 	conn    net.Conn
 	headers http.Header
 	status  int
+}
+
+type RequestError struct {
+	Message    string
+	StatusCode int
+}
+
+func (e *RequestError) Error() string {
+	return e.Message
 }
 
 var routes = &Route{
@@ -78,6 +86,7 @@ func handleRequest(conn net.Conn) {
 	}(conn)
 
 	reader := bufio.NewReader(conn)
+	writer := makeResponseWriter(conn)
 	request, err := http.ReadRequest(reader)
 
 	if err != nil {
@@ -90,14 +99,11 @@ func handleRequest(conn net.Conn) {
 		return
 	}
 
-	//figure out how to invoke the function upon an http request
-	node, err := routes.findRouteNode(request.Method, request.URL.Path)
-	if err != nil {
-		fmt.Println("Error finding route : " + err.Error())
+	node, findRouteNodeError := routes.findRouteNode(request.Method, request.URL.Path)
+	if findRouteNodeError != nil {
+		sendError(writer, findRouteNodeError)
 		return
 	}
-
-	writer := makeResponseWriter(conn)
 
 	node.handler.ServeHTTP(writer, request)
 
@@ -141,8 +147,21 @@ func main() {
 func testHandler(w http.ResponseWriter, r *http.Request) {
 	payload := `{"message":"hello world"}`
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+	w.Header().Set("Content-Length", "1048576")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(payload))
 
+}
+
+func sendError(w http.ResponseWriter, requestError *RequestError) {
+	//1048756 represents 1MB in bytes (1024*1024)
+	w.Header().Set("Content-Length", "1048576")
+	w.Header().Set("Content-Type", "application/json")
+	payload := `{"message":"` + requestError.Message + `"}`
+	w.WriteHeader(requestError.StatusCode)
+	_, err := w.Write([]byte(payload))
+	if err != nil {
+		fmt.Println("Error writing body :", err)
+		return
+	}
 }

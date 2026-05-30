@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 )
@@ -30,18 +29,24 @@ func (r *Route) Handle(method string, path string, handler func(http.ResponseWri
 	r.registerRoute(method, path, handler)
 
 }
-func (r *Route) findRouteNode(method string, path string) (*Route, error) {
+func (r *Route) findRouteNode(method string, path string) (*Route, *RequestError) {
 	node := r
 	for _, seg := range strings.Split(strings.Trim(path, "/"), "/") {
 		child, ok := node.children[seg]
 		if !ok {
-			return nil, fmt.Errorf("404 not found")
+			return nil, &RequestError{
+				Message:    "route not found",
+				StatusCode: 404,
+			}
 		}
 		node = child
 	}
 
 	if node.method != method {
-		return nil, fmt.Errorf("method %s not allowed", node.method)
+		return nil, &RequestError{
+			Message:    "Method not allowed",
+			StatusCode: 405,
+		}
 	}
 
 	return node, nil
