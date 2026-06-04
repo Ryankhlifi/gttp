@@ -2,81 +2,108 @@ package main
 
 import (
 	"net/http"
-	"strings"
 )
 
 type Route struct {
 	children map[string]*Route
-	handler  http.Handler
 	segment  string
 	end      bool
-	method   string
+	methods  map[string]http.Handler
 }
 
-// Handle : this registers a routes and adds a handler/**
+// Handle : this registers a routes and adds a handler function/**
 func (r *Route) Handle(method string, path string, handler func(http.ResponseWriter, *http.Request)) {
-	node, _ := r.findRouteNode(method, path)
-	if node != nil && node.method == method {
+	handlerFunc := http.HandlerFunc(handler)
+	node := r.findRouteNode(method, path)
+	if node != nil && node.methods[method] != nil {
 		panic("Ambigious path: " + path)
 	}
 	if handler == nil {
 		panic("Nil handler given for " + path)
 	}
 	if node != nil {
-		node.handler = http.HandlerFunc(handler)
+		node.methods[method] = handlerFunc
+		return
 	}
 
 	r.registerRoute(method, path, handler)
 
 }
-func (r *Route) findRouteNode(method string, path string) (*Route, *RequestError) {
+func (r *Route) findRouteNode(method string, path string) *Route {
 	node := r
-	for _, seg := range strings.Split(strings.Trim(path, "/"), "/") {
-		child, ok := node.children[seg]
+
+	var start int
+	var segment string
+	i := 0
+
+	for i < len(path) {
+
+		for i < len(path) && path[i] == '/' {
+			i++
+		}
+
+		if i > len(path) {
+			break
+		}
+
+		start = i
+
+		for i < len(path) && path[i] != '/' {
+			i++
+		}
+
+		segment = path[start:i]
+
+		child, ok := node.children[segment]
 		if !ok {
-			return nil, &RequestError{
-				Message:    "route not found",
-				StatusCode: 404,
-			}
+			return nil
 		}
 		node = child
 	}
 
-	if node.method != method {
-		return nil, &RequestError{
-			Message:    "Method not allowed",
-			StatusCode: 405,
-		}
+	if node.methods[method] == nil {
+		return nil
 	}
 
-	return node, nil
+	return node
 }
 
 func (r *Route) registerRoute(method string, path string, handler http.HandlerFunc) {
-	segments := strings.Split(strings.Trim(path, "/"), "/")
 	node := r
 
-	for index, segment := range segments {
+	var start int
+	var segment string
+	i := 0
+	for i < len(path) {
 
-		if _, ok := node.children[segment]; ok {
-			node = node.children[segment]
-			if node.handler == nil {
-				node.handler = handler
-			}
-			continue
+		for i < len(path) && path[i] == '/' {
+			i++
 		}
 
-		node.children = make(map[string]*Route)
-		node.children[segment] = &Route{
-			children: make(map[string]*Route),
-			segment:  segment,
+		if i >= len(path) {
+			break
+		}
+
+		start = i
+
+		for i < len(path) && path[i] != '/' {
+			i++
+		}
+
+		segment = path[start:i]
+		_, ok := node.children[segment]
+		if !ok {
+			node.children[segment] = &Route{
+				children: make(map[string]*Route),
+				segment:  segment,
+				methods:  make(map[string]http.Handler),
+			}
 		}
 
 		node = node.children[segment]
-		if index == len(segments)-1 {
+		if i == len(path) {
 			node.end = true
-			node.handler = handler
-			node.method = method
+			node.methods[method] = handler
 		}
 
 	}
