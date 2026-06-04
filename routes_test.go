@@ -100,7 +100,7 @@ func TestFindRouteNode_WrongMethod(t *testing.T) {
 
 	_, err := r.findRouteNode("POST", "/users")
 	if err == nil {
-		t.Fatal("expected error for wrong method, got nil")
+		t.Fatal("expected error for wrong methods, got nil")
 	}
 }
 
@@ -121,7 +121,7 @@ func TestFindRouteNode_PartialPathNotFound(t *testing.T) {
 	r := newRouter()
 	r.Handle("GET", "/api/v1/users", dummyHandler)
 
-	// /api/v1 exists as an intermediate node but has no handler/method
+	// /api/v1 exists as an intermediate node but has no handler/methods
 	_, err := r.findRouteNode("GET", "/api/v1")
 	if err == nil {
 		t.Fatal("expected error for partial path, got nil")
@@ -141,7 +141,7 @@ func TestHandler_IsCalledOnMatch(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/hello", nil)
 	rec := httptest.NewRecorder()
-	node.handler.ServeHTTP(rec, req)
+	node.methods["GET"].ServeHTTP(rec, req)
 
 	if rec.Body.String() != "hello world" {
 		t.Errorf("expected 'hello world', got '%s'", rec.Body.String())
@@ -160,7 +160,7 @@ func TestHandler_CorrectHandlerMatchedAmongMultiple(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/bar", nil)
 	rec := httptest.NewRecorder()
-	node.handler.ServeHTTP(rec, req)
+	node.methods["GET"].ServeHTTP(rec, req)
 
 	if rec.Body.String() != "bar" {
 		t.Errorf("expected 'bar', got '%s'", rec.Body.String())
@@ -214,7 +214,7 @@ func TestRegisterRoute_SharedPrefixRoutes(t *testing.T) {
 		}
 		req := httptest.NewRequest("GET", tc.path, nil)
 		rec := httptest.NewRecorder()
-		node.handler.ServeHTTP(rec, req)
+		node.methods["GET"].ServeHTTP(rec, req)
 		if rec.Body.String() != tc.want {
 			t.Errorf("path %s: expected '%s', got '%s'", tc.path, tc.want, rec.Body.String())
 		}
