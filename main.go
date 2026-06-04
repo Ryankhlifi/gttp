@@ -7,6 +7,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
+	"strconv"
+	"time"
 )
 
 type ResponseWriter struct {
@@ -25,11 +28,10 @@ func (e *RequestError) Error() string {
 }
 
 var routes = &Route{
-	children: nil,
-	handler:  nil,
-	segment:  "/test",
+	children: make(map[string]*Route),
+	segment:  "/",
 	end:      false,
-	method:   http.MethodGet,
+	methods:  make(map[string]http.Handler),
 }
 
 func (rw *ResponseWriter) Header() http.Header {
@@ -37,30 +39,34 @@ func (rw *ResponseWriter) Header() http.Header {
 }
 
 func (rw *ResponseWriter) WriteHeader(status int) {
+	rw.Header().Set("Content-Type", "application/json")
+	rw.Header().Set("Connection", "Keep-Alive")
 	rw.status = status
 	_, err := fmt.Fprintf(rw.conn, "HTTP/1.1 %d %s\r\n", status, http.StatusText(status))
+
 	if err != nil {
 		fmt.Println("Error setting status code :", err)
-		return
-	}
-	err = rw.headers.Write(rw.conn)
-	if err != nil {
-		fmt.Println("Error writing header :", err)
-		return
-	}
-
-	_, err = fmt.Fprintf(rw.conn, "\r\n")
-	if err != nil {
-		fmt.Println("Error seperating headers from body :", err)
 		return
 	}
 
 }
 
 func (rw *ResponseWriter) Write(b []byte) (int, error) {
-	if rw.status == 0 {
-		rw.WriteHeader(http.StatusOK)
+	if b != nil {
+		bodyLength := strconv.Itoa(len(b))
+		rw.Header().Add("Content-Length", bodyLength)
+		err := rw.Header().Write(rw.conn)
+		if err != nil {
+			fmt.Println("Error writing content length header :", err)
+			return 0, err
+		}
 	}
+	_, err := fmt.Fprintf(rw.conn, "\r\n")
+	if err != nil {
+		fmt.Println("Error seperating headers from body :", err)
+		return 0, err
+	}
+
 	n, err := rw.conn.Write(b)
 	if err != nil {
 		fmt.Println("Error writing body :", err)
@@ -72,7 +78,7 @@ func (rw *ResponseWriter) Write(b []byte) (int, error) {
 func makeResponseWriter(conn net.Conn) *ResponseWriter {
 	return &ResponseWriter{
 		conn:    conn,
-		headers: make(http.Header),
+		headers: http.Header{},
 	}
 }
 
@@ -81,37 +87,45 @@ func handleRequest(conn net.Conn) {
 	defer func(conn net.Conn) {
 		err := conn.Close()
 		if err != nil {
-			fmt.Println("Error closing connection")
+			fmt.Println("Error closing connection : ", err)
 		}
 	}(conn)
 
 	reader := bufio.NewReader(conn)
-	writer := makeResponseWriter(conn)
-	request, err := http.ReadRequest(reader)
+	for {
 
-	if err != nil {
-		if err == io.EOF {
-			fmt.Println("EOF , closing connection")
+		err := conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		if err != nil {
+			fmt.Println("Error setting read deadline :", err)
 			return
 		}
 
-		fmt.Println("Error reading request: " + err.Error())
-		return
+		writer := makeResponseWriter(conn)
+		request, err := http.ReadRequest(reader)
+
+		if err != nil {
+			if err == io.EOF {
+				fmt.Println("client closed connection , closing connection")
+			} else {
+				fmt.Println("Error reading request: " + err.Error())
+			}
+			return
+		}
+
+		node := routes.findRouteNode(request.Method, request.URL.Path)
+		if node == nil {
+			sendError(writer, &RequestError{"route not found", http.StatusNotFound})
+			continue
+		}
+
+		node.methods[request.Method].ServeHTTP(writer, request)
 	}
-
-	node, findRouteNodeError := routes.findRouteNode(request.Method, request.URL.Path)
-	if findRouteNodeError != nil {
-		sendError(writer, findRouteNodeError)
-		return
-	}
-
-	node.handler.ServeHTTP(writer, request)
-
 }
 
 func main() {
 
-	routes.Handle("GET", "/test", testHandler)
+	routes.Handle("POST", "/test", postTestHandler)
+	routes.Handle("GET", "/test", getTestHandler)
 
 	if len(os.Args) != 2 {
 		panic("unspecified port or too many arguments. Usage : go run main.go [PORT]")
@@ -139,15 +153,34 @@ func main() {
 
 		go handleRequest(conn)
 
+		//runtime memory benchmark
+
+		go func() {
+			ticker := time.NewTicker(1 * time.Second)
+			defer ticker.Stop()
+
+			for range ticker.C {
+				memoryBenchmark()
+			}
+		}()
+
 	}
 
 }
 
 // a simple test handler to send a JSON payload
-func testHandler(w http.ResponseWriter, r *http.Request) {
-	payload := `{"message":"hello world"}`
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Content-Length", "1048576")
+func getTestHandler(w http.ResponseWriter, _ *http.Request) {
+	payload := `{"message":" /test , methods is GET"}`
+	w.WriteHeader(http.StatusOK)
+	_, err := w.Write([]byte(payload))
+	if err != nil {
+		return
+	}
+
+}
+
+func postTestHandler(w http.ResponseWriter, _ *http.Request) {
+	payload := `{"message":" /test , methods is POST"}`
 	w.WriteHeader(http.StatusOK)
 	_, err := w.Write([]byte(payload))
 	if err != nil {
@@ -157,9 +190,6 @@ func testHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func sendError(w http.ResponseWriter, requestError *RequestError) {
-	//1048756 represents 1MB in bytes (1024*1024)
-	w.Header().Set("Content-Length", "1048576")
-	w.Header().Set("Content-Type", "application/json")
 	payload := `{"message":"` + requestError.Message + `"}`
 	w.WriteHeader(requestError.StatusCode)
 	_, err := w.Write([]byte(payload))
@@ -167,4 +197,20 @@ func sendError(w http.ResponseWriter, requestError *RequestError) {
 		fmt.Println("Error writing body :", err)
 		return
 	}
+}
+
+func memoryBenchmark() {
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	fmt.Printf(
+		"Alloc = %v MiB | TotalAlloc = %v MiB | Sys = %v MiB | NumGC = %v\n",
+		bToMb(stats.Alloc),
+		bToMb(stats.TotalAlloc),
+		bToMb(stats.Sys),
+		stats.NumGC,
+	)
+}
+
+func bToMb(b uint64) uint64 {
+	return b / 1024 / 1024
 }
