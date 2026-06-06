@@ -168,10 +168,6 @@ func handleRequest(conn net.Conn) {
 
 func main() {
 
-	routes.Handle("POST", "/test", postTestHandler)
-	routes.Handle("GET", "/test", getTestHandler)
-	routes.Handle("GET", "/test/{id}", getTestHandlerWithPathVariable)
-
 	if len(os.Args) != 2 {
 		panic("unspecified port or too many arguments. Usage : go run main.go [PORT]")
 	}
