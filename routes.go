@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"net/http"
+	"strconv"
 )
 
 type Route struct {
@@ -11,26 +13,18 @@ type Route struct {
 	methods  map[string]http.Handler
 }
 
-// Handle : this registers a routes and adds a handler function/**
 func (r *Route) Handle(method string, path string, handler func(http.ResponseWriter, *http.Request)) {
-	handlerFunc := http.HandlerFunc(handler)
-	node := r.findRouteNode(method, path)
-	if node != nil && node.methods[method] != nil {
-		panic("Ambigious path: " + path)
+	err := r.registerRoute(method, path, handler)
+	if err != nil {
+		panic(err)
 	}
-	if handler == nil {
-		panic("Nil handler given for " + path)
-	}
-	if node != nil {
-		node.methods[method] = handlerFunc
-		return
-	}
-
-	r.registerRoute(method, path, handler)
 
 }
-func (r *Route) findRouteNode(method string, path string) *Route {
+
+func (r *Route) findRouteNode(request *http.Request) *Route {
 	node := r
+	path := request.URL.Path
+	method := request.Method
 
 	var start int
 	var segment string
@@ -53,7 +47,13 @@ func (r *Route) findRouteNode(method string, path string) *Route {
 		}
 
 		segment = path[start:i]
+		_, isNumber := strconv.Atoi(segment)
 
+		// isNumber == nil means the conversion didn't throw an error so segment in a number
+		if isNumber == nil {
+			request.SetPathValue("id", segment)
+			segment = "{id}"
+		}
 		child, ok := node.children[segment]
 		if !ok {
 			return nil
@@ -68,7 +68,10 @@ func (r *Route) findRouteNode(method string, path string) *Route {
 	return node
 }
 
-func (r *Route) registerRoute(method string, path string, handler http.HandlerFunc) {
+func (r *Route) registerRoute(method string, path string, handler http.HandlerFunc) error {
+	if handler == nil {
+		return errors.New("nil handler given for route " + path)
+	}
 	node := r
 
 	var start int
@@ -102,10 +105,13 @@ func (r *Route) registerRoute(method string, path string, handler http.HandlerFu
 
 		node = node.children[segment]
 		if i == len(path) {
+			if node.methods[method] != nil {
+				return errors.New("ambiguous path")
+			}
 			node.end = true
 			node.methods[method] = handler
 		}
 
 	}
-
+	return nil
 }
