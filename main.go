@@ -13,9 +13,11 @@ import (
 )
 
 type ResponseWriter struct {
-	conn    net.Conn
-	headers http.Header
-	status  int
+	conn        net.Conn
+	writer      *bufio.Writer
+	headers     http.Header
+	status      int
+	wroteHeader bool
 }
 
 type RequestError struct {
@@ -34,51 +36,82 @@ var routes = &Route{
 	methods:  make(map[string]http.Handler),
 }
 
-func (rw *ResponseWriter) Header() http.Header {
-	return rw.headers
-}
+func (rw *ResponseWriter) flushHeaders() {
+	if rw.wroteHeader {
+		return
+	}
 
-func (rw *ResponseWriter) WriteHeader(status int) {
-	rw.Header().Set("Content-Type", "application/json")
-	rw.Header().Set("Connection", "Keep-Alive")
-	rw.status = status
-	_, err := fmt.Fprintf(rw.conn, "HTTP/1.1 %d %s\r\n", status, http.StatusText(status))
+	if rw.status == 0 {
+		rw.status = http.StatusOK
+	}
 
+	if rw.Header().Get("Content-Type") == "" {
+		rw.Header().Set("Content-Type", "application/json")
+	}
+	if rw.Header().Get("Connection") == "" {
+		rw.Header().Set("Connection", "Keep-Alive")
+	}
+
+	// default to 0 length if no length is set
+	if rw.Header().Get("Content-Length") == "" && rw.Header().Get("Transfer-Encoding") == "" {
+		rw.Header().Set("Content-Length", "0")
+	}
+
+	_, err := fmt.Fprintf(rw.writer, "HTTP/1.1 %d %s\r\n", rw.status, http.StatusText(rw.status))
 	if err != nil {
 		fmt.Println("Error setting status code :", err)
 		return
 	}
 
+	err = rw.Header().Write(rw.writer)
+	if err != nil {
+		fmt.Println("Error writing headers:", err)
+		return
+	}
+
+	_, err = rw.writer.WriteString("\r\n")
+	if err != nil {
+		fmt.Println("Error separating headers from body:", err)
+	}
+
+	rw.wroteHeader = true
+}
+
+func (rw *ResponseWriter) Header() http.Header {
+	return rw.headers
+}
+
+func (rw *ResponseWriter) WriteHeader(status int) {
+	rw.status = status
 }
 
 func (rw *ResponseWriter) Write(b []byte) (int, error) {
-	if b != nil {
-		bodyLength := strconv.Itoa(len(b))
-		rw.Header().Add("Content-Length", bodyLength)
-		err := rw.Header().Write(rw.conn)
-		if err != nil {
-			fmt.Println("Error writing content length header :", err)
-			return 0, err
+	if !rw.wroteHeader {
+		if rw.Header().Get("Content-Length") == "" {
+			rw.Header().Set("Content-Length", strconv.Itoa(len(b)))
 		}
-	}
-	_, err := fmt.Fprintf(rw.conn, "\r\n")
-	if err != nil {
-		fmt.Println("Error seperating headers from body :", err)
-		return 0, err
+		rw.flushHeaders()
 	}
 
-	n, err := rw.conn.Write(b)
+	if b == nil || len(b) == 0 {
+		return 0, nil
+	}
+
+	n, err := rw.writer.Write(b)
 	if err != nil {
 		fmt.Println("Error writing body :", err)
-		return 0, err
+		return n, err
 	}
+
 	return n, nil
 }
 
-func makeResponseWriter(conn net.Conn) *ResponseWriter {
+func makeResponseWriter(conn net.Conn, bw *bufio.Writer) *ResponseWriter {
 	return &ResponseWriter{
-		conn:    conn,
-		headers: http.Header{},
+		conn:        conn,
+		writer:      bw,
+		headers:     http.Header{},
+		wroteHeader: false,
 	}
 }
 
@@ -92,6 +125,7 @@ func handleRequest(conn net.Conn) {
 	}(conn)
 
 	reader := bufio.NewReader(conn)
+	bw := bufio.NewWriter(conn)
 	for {
 
 		err := conn.SetReadDeadline(time.Now().Add(30 * time.Second))
@@ -100,25 +134,35 @@ func handleRequest(conn net.Conn) {
 			return
 		}
 
-		writer := makeResponseWriter(conn)
+		writer := makeResponseWriter(conn, bw)
 		request, err := http.ReadRequest(reader)
 
 		if err != nil {
-			if err == io.EOF {
-				fmt.Println("client closed connection , closing connection")
-			} else {
-				fmt.Println("Error reading request: " + err.Error())
+			if err != io.EOF {
+				go fmt.Println("Error reading request: " + err.Error())
 			}
 			return
 		}
 
-		node := routes.findRouteNode(request.Method, request.URL.Path)
+		node := routes.findRouteNode(request)
 		if node == nil {
 			sendError(writer, &RequestError{"route not found", http.StatusNotFound})
+			writer.flushHeaders() // ensure headers are written
+			err := bw.Flush()
+			if err != nil {
+				fmt.Println("Error flushing buffer :", err)
+				return
+			}
 			continue
 		}
 
 		node.methods[request.Method].ServeHTTP(writer, request)
+		writer.flushHeaders() // ensure headers are written even if Write() wasn't called
+		err = bw.Flush()
+		if err != nil {
+			fmt.Println("Error flushing buffer :", err)
+			return
+		}
 	}
 }
 
@@ -126,6 +170,7 @@ func main() {
 
 	routes.Handle("POST", "/test", postTestHandler)
 	routes.Handle("GET", "/test", getTestHandler)
+	routes.Handle("GET", "/test/{id}", getTestHandlerWithPathVariable)
 
 	if len(os.Args) != 2 {
 		panic("unspecified port or too many arguments. Usage : go run main.go [PORT]")
@@ -154,37 +199,17 @@ func main() {
 		go handleRequest(conn)
 
 		//runtime memory benchmark
+		/*
+			go func() {
+				ticker := time.NewTicker(1 * time.Second)
+				defer ticker.Stop()
 
-		go func() {
-			ticker := time.NewTicker(1 * time.Second)
-			defer ticker.Stop()
+				for range ticker.C {
+					memoryBenchmark()
+				}
+			}()
 
-			for range ticker.C {
-				memoryBenchmark()
-			}
-		}()
-
-	}
-
-}
-
-// a simple test handler to send a JSON payload
-func getTestHandler(w http.ResponseWriter, _ *http.Request) {
-	payload := `{"message":" /test , methods is GET"}`
-	w.WriteHeader(http.StatusOK)
-	_, err := w.Write([]byte(payload))
-	if err != nil {
-		return
-	}
-
-}
-
-func postTestHandler(w http.ResponseWriter, _ *http.Request) {
-	payload := `{"message":" /test , methods is POST"}`
-	w.WriteHeader(http.StatusOK)
-	_, err := w.Write([]byte(payload))
-	if err != nil {
-		return
+		*/
 	}
 
 }
