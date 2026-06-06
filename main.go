@@ -192,7 +192,6 @@ func main() {
 		}
 
 		go handleRequest(conn)
-
 	}
 
 }
