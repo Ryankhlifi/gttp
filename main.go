@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"runtime"
 	"strconv"
 	"time"
 )
@@ -194,18 +193,6 @@ func main() {
 
 		go handleRequest(conn)
 
-		//runtime memory benchmark
-		/*
-			go func() {
-				ticker := time.NewTicker(1 * time.Second)
-				defer ticker.Stop()
-
-				for range ticker.C {
-					memoryBenchmark()
-				}
-			}()
-
-		*/
 	}
 
 }
@@ -218,20 +205,4 @@ func sendError(w http.ResponseWriter, requestError *RequestError) {
 		fmt.Println("Error writing body :", err)
 		return
 	}
-}
-
-func memoryBenchmark() {
-	var stats runtime.MemStats
-	runtime.ReadMemStats(&stats)
-	fmt.Printf(
-		"Alloc = %v MiB | TotalAlloc = %v MiB | Sys = %v MiB | NumGC = %v\n",
-		bToMb(stats.Alloc),
-		bToMb(stats.TotalAlloc),
-		bToMb(stats.Sys),
-		stats.NumGC,
-	)
-}
-
-func bToMb(b uint64) uint64 {
-	return b / 1024 / 1024
 }
