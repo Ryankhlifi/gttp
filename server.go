@@ -6,7 +6,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 )
@@ -26,13 +25,6 @@ type RequestError struct {
 
 func (e *RequestError) Error() string {
 	return e.Message
-}
-
-var routes = &Route{
-	children: make(map[string]*Route),
-	segment:  "/",
-	end:      false,
-	methods:  make(map[string]http.Handler),
 }
 
 func (rw *ResponseWriter) flushHeaders() {
@@ -165,13 +157,13 @@ func handleRequest(conn net.Conn) {
 	}
 }
 
-func main() {
+func listen(port string) {
 
-	if len(os.Args) != 2 {
-		panic("unspecified port or too many arguments. Usage : go run main.go [PORT]")
+	if port == "" {
+		panic("You must provide a port to listen on.")
 	}
 
-	port := ":" + os.Args[1]
+	port = ":" + port
 	listener, err := net.Listen("tcp", port)
 	if err != nil {
 		panic(err.Error())
