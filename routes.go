@@ -13,12 +13,11 @@ type Route struct {
 	methods  map[string]http.Handler
 }
 
-func (r *Route) Handle(method string, path string, handler func(http.ResponseWriter, *http.Request)) {
-	err := r.registerRoute(method, path, handler)
-	if err != nil {
-		panic(err)
-	}
-
+var routes = &Route{
+	children: make(map[string]*Route),
+	segment:  "/",
+	end:      false,
+	methods:  make(map[string]http.Handler),
 }
 
 func (r *Route) findRouteNode(request *http.Request) *Route {
@@ -114,4 +113,12 @@ func (r *Route) registerRoute(method string, path string, handler http.HandlerFu
 
 	}
 	return nil
+}
+
+func Handle(method string, path string, handler func(http.ResponseWriter, *http.Request)) {
+	err := routes.registerRoute(method, path, handler)
+	if err != nil {
+		panic(err)
+	}
+
 }
