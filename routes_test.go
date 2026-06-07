@@ -76,33 +76,21 @@ func TestFindRouteNode(t *testing.T) {
 }
 
 func TestHandle(t *testing.T) {
-	root := &Route{
-		children: make(map[string]*Route),
-		segment:  "/",
-		methods:  make(map[string]http.Handler),
-	}
-
 	defer func() {
 		if r := recover(); r != nil {
 			t.Errorf("Handle panicked: %v", r)
 		}
 	}()
 
-	root.Handle(http.MethodGet, "/test", func(w http.ResponseWriter, r *http.Request) {})
+	Handle(http.MethodGet, "/test", func(w http.ResponseWriter, r *http.Request) {})
 }
 
 func TestHandlePanic(t *testing.T) {
-	root := &Route{
-		children: make(map[string]*Route),
-		segment:  "/",
-		methods:  make(map[string]http.Handler),
-	}
-
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("Expected Handle to panic on nil handler")
 		}
 	}()
 
-	root.Handle(http.MethodGet, "/test", nil)
+	Handle(http.MethodGet, "/test", nil)
 }
