@@ -1,6 +1,6 @@
 # gttp
 
-`gttp` is a simple, lightweight, and performance-focused HTTP server framework built from scratch in Go.
+`gttp` is a simple, lightweight, and performance-focused HTTP server built from scratch in Go.
 
 It provides a minimal API for registering routes and starting an HTTP server, while keeping the internals clear and easy to understand.
 
