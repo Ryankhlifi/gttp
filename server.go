@@ -1,4 +1,4 @@
-package main
+package gttp
 
 import (
 	"bufio"
@@ -157,7 +157,7 @@ func handleRequest(conn net.Conn) {
 	}
 }
 
-func listen(port string) {
+func Listen(port string) {
 
 	if port == "" {
 		panic("You must provide a port to listen on.")
