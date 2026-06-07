@@ -1,4 +1,4 @@
-package main
+package gttp
 
 import (
 	"net/http"

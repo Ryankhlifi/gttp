@@ -1,4 +1,4 @@
-package main
+package gttp
 
 import (
 	"errors"
@@ -120,5 +120,4 @@ func Handle(method string, path string, handler func(http.ResponseWriter, *http.
 	if err != nil {
 		panic(err)
 	}
-
 }
